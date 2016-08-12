@@ -21,7 +21,6 @@
  * commercial activities involving this program without disclosing the source
  * code of your own applications
  */
-namespace thread {
 
 template <typename T>
 Queue<T>::Queue(
@@ -30,13 +29,13 @@ Queue<T>::Queue(
     length_(0) {}
 
 template <typename T>
-void Queue<T>::insert(const T& job, bool block /* = false */) {
+bool Queue<T>::insert(const T& job, bool block /* = false */) {
   std::unique_lock<std::mutex> lk(mutex_);
 
   if (max_size_ != size_t(-1)) {
     while (length_ >= max_size_) {
       if (!block) {
-        RAISE(kRuntimeError, "queue is full");
+        return false;
       }
 
       wakeup_.wait(lk);
@@ -47,6 +46,7 @@ void Queue<T>::insert(const T& job, bool block /* = false */) {
   ++length_;
   lk.unlock();
   wakeup_.notify_all();
+  return true;
 }
 
 template <typename T>
@@ -121,4 +121,3 @@ void Queue<T>::waitUntilEmpty() const {
   }
 }
 
-}

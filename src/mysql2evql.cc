@@ -24,10 +24,12 @@
  */
 #include <unistd.h>
 #include <iostream>
+#include <thread>
 #include "util/return_code.h"
 #include "util/flagparser.h"
 #include "util/logging.h"
 #include "util/mysql.h"
+#include "util/queue.h"
 #include "util/rate_limit.h"
 
 struct UploadShard {
@@ -38,7 +40,7 @@ struct UploadShard {
 bool run(const FlagParser& flags) {
   auto source_table = flags.getString("source_table");
   auto destination_table = flags.getString("destination_table");
-  auto shard_size = flags.getInt("shard_size");
+  auto batch_size = flags.getInt("batch_size");
   auto num_upload_threads = flags.getInt("upload_threads");
   auto mysql_addr = flags.getString("mysql");
   auto host = flags.getString("host");
@@ -85,33 +87,33 @@ bool run(const FlagParser& flags) {
   ////              cfg_.getUser() + ":" + cfg_.getPassword().get())));
   //}
 
-  //auto insert_uri = StringUtil::format(
-  //    "http://$0:$1/api/v1/tables/insert",
-  //    host,
-  //    port);
+  auto insert_uri = StringUtil::format(
+      "http://$0:$1/api/v1/tables/insert",
+      host,
+      port);
 
   bool upload_done = false;
   bool upload_error = false;
-  //Queue<UploadShard> upload_queue(1);
-  //List<std::thread> upload_threads;
-  //for (size_t i = 0; i < num_upload_threads; ++i) {
-  //  auto t = std::thread([&] {
-  //    while (!upload_done) {
-  //      auto shard = upload_queue.interruptiblePop();
-  //      if (shard.isEmpty()) {
-  //        continue;
-  //      }
+  Queue<UploadShard> upload_queue(1);
+  std::list<std::thread> upload_threads;
+  for (size_t i = 0; i < num_upload_threads; ++i) {
+    auto t = std::thread([&] {
+      while (!upload_done) {
+        auto shard = upload_queue.interruptiblePop();
+        if (shard.isEmpty()) {
+          continue;
+        }
 
-  //      bool success = false;
-  //      for (size_t retry = 0; retry < max_retries; ++retry) {
-  //        sleep(2 * retry);
+        bool success = false;
+        for (size_t retry = 0; retry < max_retries; ++retry) {
+          sleep(2 * retry);
 
-  //        logDebug(
-  //            "mysql2evql",
-  //            "Uploading batch; target=$0:$1 size=$2MB",
-  //            host,
-  //            port,
-  //            shard.get().data.size() / 1000000.0);
+          logDebug(
+              "mysql2evql",
+              "Uploading batch; target=$0:$1 size=$2MB",
+              host,
+              port,
+              shard.get().data.size() / 1000000.0);
 
   //        try {
   //          http::HTTPClient http_client;
@@ -141,93 +143,95 @@ bool run(const FlagParser& flags) {
   //        } catch (const std::exception& e) {
   //          logError("mysql2evql", e, "error while uploading table data");
   //        }
-  //      }
+        }
 
-  //      if (!success) {
-  //        upload_error = true;
-  //      }
-  //    }
-  //  });
+        if (!success) {
+          upload_error = true;
+        }
+      }
+    });
 
-  //  upload_threads.emplace_back(std::move(t));
-  //}
+    upload_threads.emplace_back(std::move(t));
+  }
 
-  ///* fetch rows from mysql */
-  //shard.nrows = 0;
+  /* fetch rows from mysql */
+  UploadShard shard;
+  shard.nrows = 0;
 
-  //String where_expr;
-  //if (flags.isSet("filter")) {
-  //  where_expr = "WHERE " + flags.getString("filter");
-  //}
+  std::string where_expr;
+  if (flags.isSet("filter")) {
+    where_expr = "WHERE " + flags.getString("filter");
+  }
 
-  //try {
-  //  auto get_rows_qry = StringUtil::format(
-  //      "SELECT * FROM `$0` $1;",
-  //     source_table,
-  //     where_expr);
+  try {
+    auto get_rows_qry = StringUtil::format(
+        "SELECT * FROM `$0` $1;",
+       source_table,
+       where_expr);
 
-  //  mysql_conn->executeQuery(
-  //      get_rows_qry,
-  //      [&] (const Vector<String>& column_values) -> bool {
-  //    ++shard.nrows;
+    mysql_conn->executeQuery(
+        get_rows_qry,
+        [&] (const std::vector<std::string>& column_values) -> bool {
+      ++shard.nrows;
 
-  //    logTrace("mysql2evql", "Uploading row: $0", inspect(column_values));
+      //if (shard.nrows > 1) {
+      //  json.addComma();
+      //}
 
-  //    //if (shard.nrows > 1) {
-  //    //  json.addComma();
-  //    //}
+      //json.beginObject();
+      //json.addObjectEntry("database");
+      //json.addString(db);
+      //json.addComma();
+      //json.addObjectEntry("table");
+      //json.addString(destination_table);
+      //json.addComma();
+      //json.addObjectEntry("data");
+      //json.beginObject();
 
-  //    //json.beginObject();
-  //    //json.addObjectEntry("database");
-  //    //json.addString(db);
-  //    //json.addComma();
-  //    //json.addObjectEntry("table");
-  //    //json.addString(destination_table);
-  //    //json.addComma();
-  //    //json.addObjectEntry("data");
-  //    //json.beginObject();
+      //for (size_t i = 0; i < column_names.size() && i < column_values.size(); ++i) {
+      //  if (i > 0 ){
+      //    json.addComma();
+      //  }
 
-  //    //for (size_t i = 0; i < column_names.size() && i < column_values.size(); ++i) {
-  //    //  if (i > 0 ){
-  //    //    json.addComma();
-  //    //  }
+      //  json.addObjectEntry(column_names[i]);
+      //  json.addString(column_values[i]);
+      //}
 
-  //    //  json.addObjectEntry(column_names[i]);
-  //    //  json.addString(column_values[i]);
-  //    //}
+      //json.endObject();
+      //json.endObject();
 
-  //    //json.endObject();
-  //    //json.endObject();
+      if (shard.nrows == batch_size) {
+        upload_queue.insert(shard, true);
+        shard.data.clear();
+        shard.nrows = 0;
+      }
 
-  //    if (shard.nrows == shard_size) {
-  //      upload_queue.insert(shard, true);
-  //      shard.data.clear();
-  //      shard.nrows = 0;
-  //    }
+      status_line.runMaybe();
+      return !upload_error;
+    });
+  } catch (const std::exception& e) {
+    logError(
+        "mysql2evql",
+        std::string("error while executing mysql query: ") + e.what());
 
-  //    status_line.runMaybe();
-  //    return !upload_error;
-  //  });
-  //} catch (const std::exception& e) {
-  //  logError("mysql2evql", e, "error while executing mysql query");
-  //  upload_error = true;
-  //}
+    upload_error = true;
+  }
 
-  //if (!upload_error) {
-  //  if (shard.nrows > 0) {
-  //    upload_queue.insert(shard, true);
-  //  }
+  if (!upload_error) {
+    if (shard.nrows > 0) {
+      upload_queue.insert(shard, true);
+    }
 
-  //  upload_queue.waitUntilEmpty();
-  //}
+    upload_queue.waitUntilEmpty();
+  }
 
-  //upload_done = true;
-  //upload_queue.wakeup();
-  //for (auto& t : upload_threads) {
-  //  t.join();
-  //}
+  upload_done = true;
+  upload_queue.wakeup();
+  for (auto& t : upload_threads) {
+    t.join();
+  }
 
-  //status_line.runForce();
+  status_line.runForce();
 
   if (upload_error) {
     logInfo("mysql2evql", "Upload finished with errors");
@@ -242,6 +246,20 @@ int main(int argc, const char** argv) {
   FlagParser flags;
 
   flags.defineFlag(
+      "help",
+      FlagParser::T_SWITCH,
+      false,
+      "?",
+      NULL);
+
+  flags.defineFlag(
+      "version",
+      FlagParser::T_SWITCH,
+      false,
+      "V",
+      NULL);
+
+  flags.defineFlag(
       "loglevel",
       FlagParser::T_STRING,
       false,
@@ -251,35 +269,35 @@ int main(int argc, const char** argv) {
   flags.defineFlag(
       "source_table",
       FlagParser::T_STRING,
-      true,
+      false,
       "t",
       NULL);
 
   flags.defineFlag(
       "destination_table",
       FlagParser::T_STRING,
-      true,
+      false,
       "t",
       NULL);
 
   flags.defineFlag(
       "host",
       FlagParser::T_STRING,
-      true,
+      false,
       "h",
       NULL);
 
   flags.defineFlag(
       "port",
       FlagParser::T_INTEGER,
-      true,
+      false,
       "p",
       NULL);
 
   flags.defineFlag(
       "database",
       FlagParser::T_STRING,
-      true,
+      false,
       NULL,
       NULL);
 
@@ -293,7 +311,7 @@ int main(int argc, const char** argv) {
   flags.defineFlag(
       "mysql",
       FlagParser::T_STRING,
-      true,
+      false,
       "x",
       "mysql://localhost:3306/mydb?user=root");
 
@@ -305,7 +323,7 @@ int main(int argc, const char** argv) {
       NULL);
 
   flags.defineFlag(
-      "shard_size",
+      "batch_size",
       FlagParser::T_INTEGER,
       false,
       NULL,
@@ -336,11 +354,11 @@ int main(int argc, const char** argv) {
 
   /* setup logging */
   if (!flags.isSet("nolog_to_stderr") && !flags.isSet("daemonize")) {
-    Logger::logToStderr("evcollectd");
+    Logger::logToStderr("mysql2evql");
   }
 
   if (flags.isSet("log_to_syslog")) {
-    Logger::logToSyslog("evcollectd");
+    Logger::logToSyslog("mysql2evql");
   }
 
   Logger::get()->setMinimumLogLevel(
@@ -350,9 +368,9 @@ int main(int argc, const char** argv) {
   if (flags.isSet("help") || flags.isSet("version")) {
     std::cerr <<
         StringUtil::format(
-            "evcollectd $0\n"
+            "mysql2evql $0\n"
             "Copyright (c) 2016, DeepCortex GmbH. All rights reserved.\n\n",
-            EVCOLLECT_VERSION);
+            MYSQL2EVQL_VERSION);
   }
 
   if (flags.isSet("version")) {
@@ -361,21 +379,32 @@ int main(int argc, const char** argv) {
 
   if (flags.isSet("help")) {
     std::cerr <<
-        "Usage: $ evcollectd [OPTIONS]\n\n"
-        "   -s, --spool_dir <dir>     Where to store temporary files\n"
-        "   -c, --config <file>       Load config from file\n"
-        "   -p, --plugin <path>       Load a plugin (.so)\n"
-        "   -P, --plugin_path <dir>   Set the plugin search path\n"
-        "   --daemonize               Daemonize the server\n"
-        "   --pidfile <file>          Write a PID file\n"
+        "Usage: $ mysql2evql [OPTIONS]\n\n"
+        "   --source_table <name>     \n"
+        "   --destination_table <name>     \n"
+        "   --host <name>     \n"
+        "   --port <name>     \n"
+        "   --auth_token <name>     \n"
+        "   --database <name>     \n"
+        "   --mysql <name>     \n"
+        "   --filter <name>     \n"
+        "   --batch_size <name>     \n"
+        "   --upload_threads <name>     \n"
+        "   --max_retries <name>     \n"
         "   --loglevel <level>        Minimum log level (default: INFO)\n"
         "   --[no]log_to_syslog       Do[n't] log to syslog\n"
         "   --[no]log_to_stderr       Do[n't] log to stderr\n"
         "   -?, --help                Display this help text and exit\n"
         "   -v, --version             Display the version of this binary and exit\n"
-        "                                                       \n"
-        "Examples:                                              \n"
-        "   $ evcollectd --daemonize --config /etc/evcollect.conf\n";
+        "                                                        \n"
+        "Examples:                                               \n"
+        "   $ mysql2evql \\\n"
+        "       --source_table src_tbl \\\n"
+        "       --destination_table target_tbl \\\n"
+        "       --host localhost \\\n"
+        "       --port 9175  \\\n"
+        "       --database target_db \\\n"
+        "       --mysql \"mysql://localhost:3306/mydb?user=root\"\n";
 
     return 0;
   }

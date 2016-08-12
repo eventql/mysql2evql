@@ -26,9 +26,8 @@
 #include <condition_variable>
 #include <functional>
 #include <list>
+#include <deque>
 #include "option.h"
-
-namespace thread {
 
 /**
  * A queue is threadsafe
@@ -39,7 +38,7 @@ public:
 
   Queue(size_t max_size = -1);
 
-  void insert(const T& job, bool block = false);
+  bool insert(const T& job, bool block = false);
   T pop();
   Option<T> interruptiblePop();
   Option<T> poll();
@@ -57,6 +56,6 @@ protected:
   size_t length_;
 };
 
-}
 
 #include "queue_impl.h"
+
