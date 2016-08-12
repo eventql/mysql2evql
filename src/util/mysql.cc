@@ -79,10 +79,9 @@ void MySQLConnection::connect(const URI& uri) {
   std::string database;
 
   if (host.size() == 0) {
-    //RAISE(
-    //    kRuntimeError,
-    //    "invalid mysql:// URI: has no hostname (URI: '%s')",
-    //    uri.toString().c_str());
+    throw std::runtime_error(StringUtil::format(
+        "invalid mysql:// URI: has no hostname (URI: '%s')",
+        uri.toString().c_str()));
   }
 
   if (uri.port() > 0) {
@@ -90,11 +89,10 @@ void MySQLConnection::connect(const URI& uri) {
   }
 
   if (uri.path().size() < 2 || uri.path()[0] != '/') {
-    //RAISE(
-    //    kRuntimeError,
-    //    "invalid mysql:// URI: missing database, format is: mysql://host/db "
-    //    " (URI: %s)",
-    //    uri.toString().c_str());
+    throw std::runtime_error(StringUtil::format(
+        "invalid mysql:// URI: missing database, format is: mysql://host/db "
+        " (URI: %s)",
+        uri.toString().c_str()));
   }
 
   database = uri.path().substr(1);
@@ -110,11 +108,10 @@ void MySQLConnection::connect(const URI& uri) {
       continue;
     }
 
-    //RAISE(
-    //    kRuntimeError,
-    //    "invalid parameter for mysql:// URI: '%s=%s'",
-    //    param.first.c_str(),
-    //    param.second.c_str());
+    throw std::runtime_error(StringUtil::format(
+        "invalid parameter for mysql:// URI: '%s=%s'",
+        param.first.c_str(),
+        param.second.c_str()));
   }
 
   connect(host, port, database, username, password);
@@ -137,10 +134,9 @@ void MySQLConnection::connect(
       CLIENT_COMPRESS);
 
   if (ret != mysql_) {
-    //RAISE(
-    //  kRuntimeError,
-    //  "mysql_real_connect() failed: %s\n",
-    //  mysql_error(mysql_));
+    throw std::runtime_error(StringUtil::format(
+        "mysql_real_connect() failed: %s\n",
+        mysql_error(mysql_)));
   }
 }
 
@@ -150,10 +146,9 @@ std::vector<std::string> MySQLConnection::describeTable(
 
   MYSQL_RES* res = mysql_list_fields(mysql_, table_name.c_str(), NULL);
   if (res == nullptr) {
-    //RAISE(
-    //  kRuntimeError,
-    //  "mysql_list_fields() failed: %s\n",
-    //  mysql_error(mysql_));
+    throw std::runtime_error(StringUtil::format(
+        "mysql_list_fields() failed: %s\n",
+        mysql_error(mysql_)));
   }
 
   auto num_cols = mysql_num_fields(res);
@@ -179,11 +174,10 @@ void MySQLConnection::executeQuery(
   }
 
   if (result == nullptr) {
-    //RAISE(
-    //    kRuntimeError,
-    //    "mysql query failed: %s -- error: %s\n",
-    //    query.c_str(),
-    //    mysql_error(mysql_));
+    throw std::runtime_error(StringUtil::format(
+        "mysql query failed: %s -- error: %s\n",
+        query.c_str(),
+        mysql_error(mysql_)));
   }
 
   MYSQL_ROW row;
@@ -220,11 +214,10 @@ std::list<std::vector<std::string>> MySQLConnection::executeQuery(
   }
 
   if (result == nullptr) {
-    //RAISE(
-    //    kRuntimeError,
-    //    "mysql query failed: %s -- error: %s",
-    //    query.c_str(),
-    //    mysql_error(mysql_));
+    throw std::runtime_error(StringUtil::format(
+        "mysql query failed: %s -- error: %s",
+        query.c_str(),
+        mysql_error(mysql_)));
   }
 
 
@@ -232,11 +225,10 @@ std::list<std::vector<std::string>> MySQLConnection::executeQuery(
   while ((row = mysql_fetch_row(result))) {
     auto col_lens = mysql_fetch_lengths(result);
     if (col_lens == nullptr) {
-      //RAISE(
-      //    kRuntimeError,
-      //    "mysql query failed: %s -- error: mysql_fetch_lenghts() failed:  %s",
-      //    query.c_str(),
-      //    mysql_error(mysql_));
+      throw std::runtime_error(StringUtil::format(
+          "mysql query failed: %s -- error: mysql_fetch_lenghts() failed:  %s",
+          query.c_str(),
+          mysql_error(mysql_)));
     }
 
     std::vector<std::string> row_vec;

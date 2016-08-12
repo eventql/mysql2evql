@@ -27,6 +27,8 @@
 #include "util/return_code.h"
 #include "util/flagparser.h"
 #include "util/logging.h"
+#include "util/mysql.h"
+#include "util/rate_limit.h"
 
 struct UploadShard {
   std::string data;
@@ -46,8 +48,8 @@ bool run(const FlagParser& flags) {
 
   logInfo("mysql2evql", "Connecting to MySQL Server...");
 
-  //util::mysql::mysqlInit();
-  //auto mysql_conn = util::mysql::MySQLConnection::openConnection(URI(mysql_addr));
+  mysqlInit();
+  auto mysql_conn = MySQLConnection::openConnection(URI(mysql_addr));
 
   logInfo(
       "mysql2evql",
@@ -55,19 +57,19 @@ bool run(const FlagParser& flags) {
 
   //auto schema = mysql_conn->getTableSchema(source_table);
   //logDebug("mysql2evql", "Table Schema:\n$0", schema->toString());
-  //Vector<String> column_names;
+  std::vector<std::string> column_names;
   //for (const auto& field : schema->fields()) {
   //  column_names.emplace_back(field.name);
   //}
 
   ///* status line */
-  //std::atomic<size_t> num_rows_uploaded(0);
-  //util::SimpleRateLimitedFn status_line(kMicrosPerSecond, [&] () {
-  //  logInfo(
-  //      "mysql2evql",
-  //      "Uploading... $0 rows",
-  //      num_rows_uploaded.load());
-  //});
+  std::atomic<size_t> num_rows_uploaded(0);
+  SimpleRateLimitedFn status_line(kMicrosPerSecond, [&] () {
+    logInfo(
+        "mysql2evql",
+        "Uploading... $0 rows",
+        num_rows_uploaded.load());
+  });
 
   ///* start upload threads */
   //http::HTTPMessage::HeaderList auth_headers;
