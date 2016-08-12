@@ -38,5 +38,49 @@ MAINTAINERCLEANFILES =   \
   m4/lt~obsolete.m4      \
   m4/ltoptions.m4
 
+if HAVE_ZLIB
+ZLIB_DEF = -DHAVE_ZLIB=1
+else
+ZLIB_DEF =
+endif
+
+if HAVE_PTHREAD
+PTHREAD_DEF = -DHAVE_PTHREAD=1
+PTHREAD_LDFLAGS_=-lpthread
+else
+PTHREAD_DEF =
+endif
+
+if HAVE_SYSLOG_H
+SYSLOG_DEF = -DHAVE_SYSLOG_H=1
+else
+SYSLOG_DEF =
+endif
+
+if HAVE_GETHOSTBYNAME_R
+GETHOSTBYNAME_R_DEF = -DHAVE_GETHOSTBYNAME_R=1
+else
+GETHOSTBYNAME_R_DEF =
+endif
+
+CURL_LDFLAGS_=-lcurl
+
+AM_CXXFLAGS = -DEVCOLLECT_VERSION=\"v@PACKAGE_VERSION@\" $(PTHREAD_CFLAGS) $(PTHREAD_DEF) $(SYSLOG_DEF) $(ZLIB_DEF) $(GETHOSTBYNAME_R_DEF) -std=c++0x -ftemplate-depth=500 -mno-omit-leaf-frame-pointer -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wdelete-non-virtual-dtor -Wno-predefined-identifier-outside-function -Wno-invalid-offsetof -g -I$(top_srcdir)/src -I$(top_builddir)/src
+AM_CFLAGS =  $(PTHREAD_CFLAGS) $(PTHREAD_DEF) $(SYSLOG_DEF) $(ZLIB_DEF) $(GETHOSTBYNAME_R_DEF) -std=c11 -mno-omit-leaf-frame-pointer -fno-omit-frame-pointer -Wall -pedantic -g
+AM_LDFLAGS = $(PTHREAD_CFLAGS) -export-dynamic -rdynamic $(PTHREAD_LDFLAGS_)
+
 bin_PROGRAMS = mysql2evql
-mysql2evql_SOURCES = src/mysql2evql.cc
+
+mysql2evql_SOURCES = \
+  src/util/flagparser.cc \
+  src/util/flagparser.h \
+  src/util/logging.cc \
+  src/util/logging.h \
+  src/util/return_code.h \
+  src/util/stringutil.cc \
+  src/util/stringutil.h \
+  src/util/stringutil_impl.h \
+  src/util/time.cc \
+  src/util/time.h \
+  src/util/time_impl.h \
+  src/mysql2evql.cc

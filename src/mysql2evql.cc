@@ -22,18 +22,9 @@
  * commercial activities involving this program without disclosing the source
  * code of your own applications
  */
-#include <eventql/eventql.h>
-#include <eventql/util/stdtypes.h>
-#include <eventql/util/application.h>
-#include <eventql/util/cli/flagparser.h>
-#include <eventql/util/csv/BinaryCSVOutputStream.h>
-#include <eventql/util/http/httpclient.h>
-#include <eventql/util/json/jsonoutputstream.h>
-#include "eventql/util/thread/FixedSizeThreadPool.h"
-#include "eventql/util/util/SimpleRateLimit.h"
-#include <eventql/util/mysql/MySQL.h>
-#include <eventql/util/mysql/MySQLConnection.h>
 #include <unistd.h>
+#include "util/return_code.h"
+#include "util/flagparser.h"
 
 using namespace eventql;
 
