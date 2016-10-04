@@ -135,7 +135,7 @@ void MySQLConnection::connect(
 
   if (ret != mysql_) {
     throw std::runtime_error(StringUtil::format(
-        "mysql_real_connect() failed: %s\n",
+        "mysql_real_connect() failed: $0\n",
         mysql_error(mysql_)));
   }
 }
@@ -147,7 +147,7 @@ std::vector<std::string> MySQLConnection::describeTable(
   MYSQL_RES* res = mysql_list_fields(mysql_, table_name.c_str(), NULL);
   if (res == nullptr) {
     throw std::runtime_error(StringUtil::format(
-        "mysql_list_fields() failed: %s\n",
+        "mysql_list_fields() failed: $0\n",
         mysql_error(mysql_)));
   }
 
@@ -175,7 +175,7 @@ void MySQLConnection::executeQuery(
 
   if (result == nullptr) {
     throw std::runtime_error(StringUtil::format(
-        "mysql query failed: %s -- error: %s\n",
+        "mysql query failed: $0 -- error: $1\n",
         query.c_str(),
         mysql_error(mysql_)));
   }
@@ -215,7 +215,7 @@ std::list<std::vector<std::string>> MySQLConnection::executeQuery(
 
   if (result == nullptr) {
     throw std::runtime_error(StringUtil::format(
-        "mysql query failed: %s -- error: %s",
+        "mysql query failed: $0 -- error: $1",
         query.c_str(),
         mysql_error(mysql_)));
   }
@@ -226,7 +226,7 @@ std::list<std::vector<std::string>> MySQLConnection::executeQuery(
     auto col_lens = mysql_fetch_lengths(result);
     if (col_lens == nullptr) {
       throw std::runtime_error(StringUtil::format(
-          "mysql query failed: %s -- error: mysql_fetch_lenghts() failed:  %s",
+          "mysql query failed: $0 -- error: mysql_fetch_lenghts() failed: $1",
           query.c_str(),
           mysql_error(mysql_)));
     }

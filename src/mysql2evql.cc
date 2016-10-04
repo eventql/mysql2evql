@@ -48,27 +48,21 @@ bool run(const FlagParser& flags) {
   auto db = flags.getString("database");
   auto max_retries = flags.getInt("max_retries");
 
-  logInfo("mysql2evql", "Connecting to MySQL Server...");
+  logInfo("Connecting to MySQL Server...");
 
   mysqlInit();
   auto mysql_conn = MySQLConnection::openConnection(URI(mysql_addr));
 
   logInfo(
-      "mysql2evql",
       "Analyzing the input table. This might take a few minutes...");
 
-  //auto schema = mysql_conn->getTableSchema(source_table);
-  //logDebug("mysql2evql", "Table Schema:\n$0", schema->toString());
-  std::vector<std::string> column_names;
-  //for (const auto& field : schema->fields()) {
-  //  column_names.emplace_back(field.name);
-  //}
+  auto column_names = mysql_conn->describeTable(source_table);
+  logDebug("Table Columns: $0", StringUtil::join(column_names, ", "));
 
-  ///* status line */
+  /* status line */
   std::atomic<size_t> num_rows_uploaded(0);
   SimpleRateLimitedFn status_line(kMicrosPerSecond, [&] () {
     logInfo(
-        "mysql2evql",
         "Uploading... $0 rows",
         num_rows_uploaded.load());
   });
@@ -104,16 +98,15 @@ bool run(const FlagParser& flags) {
           continue;
         }
 
+        logDebug(
+            "Uploading batch; target=$0:$1 size=$2KB",
+            host,
+            port,
+            shard.get().data.size() / double(1000.0));
+
         bool success = false;
         for (size_t retry = 0; retry < max_retries; ++retry) {
           sleep(2 * retry);
-
-          logDebug(
-              "mysql2evql",
-              "Uploading batch; target=$0:$1 size=$2MB",
-              host,
-              port,
-              shard.get().data.size() / 1000000.0);
 
   //        try {
   //          http::HTTPClient http_client;
@@ -125,7 +118,7 @@ bool run(const FlagParser& flags) {
 
   //          if (upload_res.statusCode() != 201) {
   //            logError(
-  //                "mysql2evql", "[FATAL ERROR]: HTTP Status Code $0 $1",
+  //                "[FATAL ERROR]: HTTP Status Code $0 $1",
   //                upload_res.statusCode(),
   //                upload_res.body().toString());
 
@@ -136,12 +129,11 @@ bool run(const FlagParser& flags) {
   //            }
   //          }
 
-  //          num_rows_uploaded += shard.get().nrows;
   //          status_line.runMaybe();
   //          success = true;
   //          break;
   //        } catch (const std::exception& e) {
-  //          logError("mysql2evql", e, "error while uploading table data");
+  //          logError(e, "error while uploading table data");
   //        }
         }
 
@@ -174,44 +166,36 @@ bool run(const FlagParser& flags) {
         [&] (const std::vector<std::string>& column_values) -> bool {
       ++shard.nrows;
 
-      //if (shard.nrows > 1) {
-      //  json.addComma();
-      //}
+      if (shard.nrows > 1) {
+        shard.data += ",";
+      }
 
-      //json.beginObject();
-      //json.addObjectEntry("database");
-      //json.addString(db);
-      //json.addComma();
-      //json.addObjectEntry("table");
-      //json.addString(destination_table);
-      //json.addComma();
-      //json.addObjectEntry("data");
-      //json.beginObject();
+      std::vector<std::string> fields;
+      for (size_t i = 0; i < column_names.size() && i < column_values.size(); ++i) {
+        fields.emplace_back(StringUtil::format(
+            R"("$0": "$1")",
+            StringUtil::jsonEscape(column_names[i]),
+            StringUtil::jsonEscape(column_values[i])));
+      }
 
-      //for (size_t i = 0; i < column_names.size() && i < column_values.size(); ++i) {
-      //  if (i > 0 ){
-      //    json.addComma();
-      //  }
-
-      //  json.addObjectEntry(column_names[i]);
-      //  json.addString(column_values[i]);
-      //}
-
-      //json.endObject();
-      //json.endObject();
+      shard.data += StringUtil::format(
+          R"({"database": "$0", "table": "$1", "data": {$2}})",
+          StringUtil::jsonEscape(db),
+          StringUtil::jsonEscape(destination_table),
+          StringUtil::join(fields, ","));
 
       if (shard.nrows == batch_size) {
         upload_queue.insert(shard, true);
+        num_rows_uploaded += shard.nrows;
         shard.data.clear();
         shard.nrows = 0;
+        status_line.runMaybe();
       }
 
-      status_line.runMaybe();
       return !upload_error;
     });
   } catch (const std::exception& e) {
     logError(
-        "mysql2evql",
         std::string("error while executing mysql query: ") + e.what());
 
     upload_error = true;
@@ -220,6 +204,8 @@ bool run(const FlagParser& flags) {
   if (!upload_error) {
     if (shard.nrows > 0) {
       upload_queue.insert(shard, true);
+      num_rows_uploaded += shard.nrows;
+      status_line.runMaybe();
     }
 
     upload_queue.waitUntilEmpty();
@@ -234,10 +220,10 @@ bool run(const FlagParser& flags) {
   status_line.runForce();
 
   if (upload_error) {
-    logInfo("mysql2evql", "Upload finished with errors");
+    logInfo("Upload finished with errors");
     return false;
   } else {
-    logInfo("mysql2evql", "Upload finished successfully :)");
+    logInfo("Upload finished successfully :)");
     return true;
   }
 }
@@ -285,14 +271,14 @@ int main(int argc, const char** argv) {
       FlagParser::T_STRING,
       false,
       "h",
-      NULL);
+      "localhost");
 
   flags.defineFlag(
       "port",
       FlagParser::T_INTEGER,
       false,
       "p",
-      NULL);
+      "9175");
 
   flags.defineFlag(
       "database",
@@ -416,7 +402,7 @@ int main(int argc, const char** argv) {
       return 1;
     }
   } catch (const std::exception& e) {
-    logFatal("mysql2evql", "$0", e.what());
+    logFatal("$0", e.what());
     return 1;
   }
 }
