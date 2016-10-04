@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <iostream>
 #include <thread>
+#include <curl/curl.h>
 #include "util/return_code.h"
 #include "util/flagparser.h"
 #include "util/logging.h"
@@ -86,13 +87,31 @@ bool run(const FlagParser& flags) {
       host,
       port);
 
+  std::mutex upload_mutex;
   bool upload_done = false;
-  bool upload_error = false;
+  std::atomic<bool> upload_error(false);
   Queue<UploadShard> upload_queue(1);
   std::list<std::thread> upload_threads;
   for (size_t i = 0; i < num_upload_threads; ++i) {
     auto t = std::thread([&] {
-      while (!upload_done) {
+      auto curl = curl_easy_init();
+      if (!curl) {
+        logError("curl_init() failed");
+        std::unique_lock<std::mutex> lk(upload_mutex);
+        upload_error = true;
+        lk.unlock();
+        upload_queue.wakeup();
+        return;
+      }
+
+      for (;;) {
+        {
+          std::unique_lock<std::mutex> lk(upload_mutex);
+          if (upload_done || upload_error) {
+            break;
+          }
+        }
+
         auto shard = upload_queue.interruptiblePop();
         if (shard.isEmpty()) {
           continue;
@@ -106,41 +125,65 @@ bool run(const FlagParser& flags) {
 
         bool success = false;
         for (size_t retry = 0; retry < max_retries; ++retry) {
-          sleep(2 * retry);
+          sleep(std::min(retry, 5lu));
 
-  //        try {
-  //          http::HTTPClient http_client;
-  //          auto upload_res = http_client.executeRequest(
-  //              http::HTTPRequest::mkPost(
-  //                  insert_uri,
-  //                  "[" + shard.get().data.toString() + "]",
-  //                  auth_headers));
+          auto http_url = StringUtil::format(
+              "http://$0:$1/api/v1/tables/insert",
+              host,
+              port);
 
-  //          if (upload_res.statusCode() != 201) {
-  //            logError(
-  //                "[FATAL ERROR]: HTTP Status Code $0 $1",
-  //                upload_res.statusCode(),
-  //                upload_res.body().toString());
+          logInfo(http_url);
+          std::string http_body = "[" + shard.get().data + "]";
 
-  //            if (upload_res.statusCode() == 403) {
-  //              break;
-  //            } else {
-  //              continue;
-  //            }
-  //          }
+          struct curl_slist* req_headers = NULL;
+          req_headers = curl_slist_append(
+              req_headers,
+              "Content-Type: application/json; charset=utf-8");
 
-  //          status_line.runMaybe();
-  //          success = true;
-  //          break;
-  //        } catch (const std::exception& e) {
-  //          logError(e, "error while uploading table data");
-  //        }
+          if (flags.isSet("auth_token")) {
+            auto hdr = "Authorization: Token " + flags.getString("auth_token");
+            req_headers = curl_slist_append(req_headers, hdr.c_str());
+          }
+
+          //if (!username_.empty() || !password_.empty()) {
+          //  std::string hdr = "Authorization: Basic ";
+          //  hdr += Base64::encode(username_ + ":" + password_);
+          //  req_headers = curl_slist_append(req_headers, hdr.c_str());
+          //}
+
+          curl_easy_setopt(curl, CURLOPT_URL, http_url.c_str());
+          curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 5000);
+          curl_easy_setopt(curl, CURLOPT_POSTFIELDS, http_body.c_str());
+          curl_easy_setopt(curl, CURLOPT_HTTPHEADER, req_headers);
+          CURLcode curl_res = curl_easy_perform(curl);
+          curl_slist_free_all(req_headers);
+          if (curl_res != CURLE_OK) {
+            logError("http request failed: $0", curl_easy_strerror(curl_res));
+            continue;
+          }
+
+          long http_res_code = 0;
+          curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_res_code);
+
+          switch (http_res_code) {
+            case 201:
+              success = true;
+              break;
+            default:
+              logError("http error: $0", http_res_code);
+              continue;
+          }
         }
 
         if (!success) {
+          std::unique_lock<std::mutex> lk(upload_mutex);
           upload_error = true;
+          lk.unlock();
+          upload_queue.wakeup();
         }
       }
+
+      curl_easy_cleanup(curl); 
     });
 
     upload_threads.emplace_back(std::move(t));
@@ -198,7 +241,10 @@ bool run(const FlagParser& flags) {
     logError(
         std::string("error while executing mysql query: ") + e.what());
 
+    std::unique_lock<std::mutex> lk(upload_mutex);
     upload_error = true;
+    lk.unlock();
+    upload_queue.wakeup();
   }
 
   if (!upload_error) {
@@ -211,7 +257,11 @@ bool run(const FlagParser& flags) {
     upload_queue.waitUntilEmpty();
   }
 
-  upload_done = true;
+  {
+    std::unique_lock<std::mutex> lk(upload_mutex);
+    upload_done = true;
+  }
+
   upload_queue.wakeup();
   for (auto& t : upload_threads) {
     t.join();
@@ -395,14 +445,21 @@ int main(int argc, const char** argv) {
     return 0;
   }
 
+  int rc = 0;
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+
   try {
     if (run(flags)) {
-      return 0;
+      rc = 0;
     } else {
-      return 1;
+      rc = 1;
     }
   } catch (const std::exception& e) {
     logFatal("$0", e.what());
-    return 1;
+    rc = 1;
   }
+
+  curl_global_cleanup();
+  return 1;
 }
+
